@@ -94,16 +94,33 @@ class GoogleAuthService
         try {
             // Convertir el timestamp Unix (segundos desde 1970) a una fecha válida
             $expiresAt = Carbon::createFromTimestamp($accessToken->getExpires());
+            $refreshToken = $accessToken->getRefreshToken();
 
-            Log::info('Storing token for user: ' . $user->id . ', expires_at: ' . $expiresAt);
+            if (!$refreshToken) {
+                Log::warning('No refresh token received for user: ' . $user->email);
+            }
+
+            Log::info('Storing token for user: ' . $user->id, [
+                'expires_at' => $expiresAt,
+                'refresh_token' => $refreshToken ? substr($refreshToken, 0, 10) . '...' : null,
+            ]);
+
+            // Evitar sobrescribir un refresh_token existente con null
+            $existingToken = GoogleToken::where('user_id', $user->id)->first();
+            $data = [
+                'access_token' => $accessToken->getToken(),
+                'expires_at' => $expiresAt,
+            ];
+
+            if ($refreshToken) {
+                $data['refresh_token'] = $refreshToken;
+            } elseif ($existingToken && $existingToken->refresh_token) {
+                $data['refresh_token'] = $existingToken->refresh_token; // Preservar refresh_token existente
+            }
 
             return GoogleToken::updateOrCreate(
                 ['user_id' => $user->id],
-                [
-                    'access_token' => $accessToken->getToken(),
-                    'refresh_token' => $accessToken->getRefreshToken(),
-                    'expires_at' => $expiresAt,
-                ]
+                $data
             );
         } catch (Exception $e) {
             Log::error('Failed to store token: ' . $e->getMessage());

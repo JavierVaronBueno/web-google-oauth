@@ -123,7 +123,7 @@ class GoogleAuthController extends Controller
                     'clientSecret'     => env('GOOGLE_CLIENT_SECRET'),
                     'refreshToken'     => $token->refresh_token,
                     'accessToken'      => $token->access_token,
-                    'tokenExpires'     => session('google_token_expires'),
+                    'tokenExpires'     => $token->expires_at->timestamp,
                     'userName'         => env('MAIL_FROM_ADDRESS'), // Correo del remitente de tu cuenta de Google
                 ])
             );

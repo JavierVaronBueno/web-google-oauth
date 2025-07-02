@@ -9,13 +9,16 @@
 
 ## ✨ Características Principales
 
-- 🔐 **Autenticación OAuth2 de Google** - Autenticación segura con cuentas de Google
-- 🗄️ **Almacenamiento Seguro** - Tokens almacenados en base de datos con cifrado
-- 🔄 **Renovación Automática** - Manejo automático de tokens expirados
-- 🏗️ **Patrón Service** - Arquitectura modular y mantenible
-- 📝 **Logging Completo** - Sistema de logs robusto para debugging
-- 🎯 **PSR-12 Compliant** - Código limpio siguiendo estándares PHP
-- ⚡ **Manejo de Errores** - Mensajes de error amigables para el usuario
+- 🔐 **Autenticación de Usuarios**: Registro, inicio de sesión y cierre de sesión usando Laravel Breeze.
+- 🔐 **Autenticación OAuth2 de Google**: Autenticación segura con cuentas de Google para acceder a Gmail.
+- 🗄️ **Almacenamiento Seguro**: Tokens de acceso y refresco almacenados en la tabla `google_tokens` en la base de datos.
+- 🔄 **Renovación Automática**: Manejo automático de tokens expirados mediante el uso de `refresh_token`.
+- 📧 **Envío de Correos**: Envío de correos electrónicos usando PHPMailer con autenticación OAuth2.
+- 🏗️ **Patrón Service**: Arquitectura modular con servicios dedicados para autenticación y OAuth2.
+- 📝 **Logging Completo**: Sistema de logs robusto para facilitar la depuración.
+- 🎨 **Interfaz Responsiva**: Vistas Blade para login, registro y página principal con diseño simple y responsivo.
+- ⚡ **Manejo de Errores**: Mensajes de error amigables para el usuario.
+- 🎯 **PSR-12 Compliant**: Código limpio siguiendo estándares PHP.
 
 ## 🛠️ Requisitos del Sistema
 
@@ -25,6 +28,7 @@
 | Laravel | 10.x |
 | Composer | 2.x |
 | MySQL/PostgreSQL | 5.7+ / 13+ |
+| Node.js / npm | 16.x+ |
 
 ## 🚀 Instalación Rápida
 
@@ -79,6 +83,25 @@ MAIL_FROM_NAME="Laravel OAuth Mailer"
 php artisan migrate
 ```
 
+### 6. Instalar Laravel Breeze
+Instala Laravel Breeze para el scaffolding de autenticación:
+
+```bash
+composer require laravel/breeze:^1.29 --dev
+php artisan breeze:install blade
+npm install && npm run build
+php artisan migrate
+```
+Selecciona el stack `blade` cuando se te solicite, ya que el proyecto usa vistas Blade para la interfaz.
+
+#### Sobre Laravel Breeze
+`laravel/breeze` proporciona un scaffolding de autenticación ligero para Laravel, incluyendo:
+- Vistas Blade para login y registro (`resources/views/auth/`).
+- Controladores para autenticación (`AuthController`).
+- Rutas predefinidas para autenticación (`routes/web.php`).
+- Migraciones para la tabla `users`.
+
+
 ## ⚙️ Configuración de Google Cloud Console
 
 ### Paso 1: Crear Proyecto
@@ -108,36 +131,70 @@ php artisan serve
 ```
 
 ### Flujo de Autenticación
-1. Visita `http://localhost:8000`
-2. Inicia sesión con tu cuenta Laravel
-3. Haz clic en "Autenticar con Google"
-4. Autoriza los permisos solicitados
-5. ¡Envía emails desde la interfaz!
+1. Visita `http://localhost:8000`.
+2. Regístrate en `/register` o inicia sesión en `/login`.
+3. Haz clic en "Autenticar con Google" en la página principal.
+4. Autoriza los permisos solicitados en la pantalla de consentimiento de Google.
+5. Envía un correo de prueba desde la página principal.
+
+### Estructura del Flujo
+- Registro/Inicio de Sesión: Gestionado por Laravel Breeze (`AuthController`).
+- Autenticación con Google: Redirige al usuario a Google y guarda los tokens en la tabla google_tokens (`GoogleAuthController` y `GoogleAuthService`).
+- Envío de Correos: Usa PHPMailer con OAuth2 para enviar correos a través de Gmail (`GoogleAuthController`).
+
+
 
 ## 🏗️ Arquitectura del Proyecto
 
 ```
 app/
-├── Http/Controllers/
-│   └── GoogleAuthController.php     # Controlador principal OAuth2
-├── Services/
-│   └── GoogleAuthService.php       # Lógica de negocio OAuth2
+├── Http/
+│   └── Controllers/
+│       ├── AuthController.php       # Controlador para autenticación de usuarios
+│       └── GoogleAuthController.php # Controlador para Google OAuth2 y envío de correos
 ├── Models/
-│   └── GoogleToken.php             # Modelo Eloquent para tokens
-└── Mail/
-    └── TestEmail.php               # Clase de correo de prueba
-
-resources/views/
-├── welcome.blade.php               # Vista principal
-└── emails/
-    └── test.blade.php             # Plantilla de email
-
+│   ├── User.php                     # Modelo para usuarios
+│   └── GoogleToken.php              # Modelo para tokens OAuth2
+├── Services/
+│   ├── AuthService.php              # Lógica de autenticación de usuarios
+│   └── GoogleAuthService.php        # Lógica de Google OAuth2
+resources/
+├── views/
+│   ├── auth/
+│   │   ├── login.blade.php          # Vista para inicio de sesión
+│   │   └── register.blade.php       # Vista para registro
+│   ├── layouts/
+│   │   └── app.blade.php            # Plantilla base
+│   └── welcome.blade.php            # Página principal
 routes/
-└── web.php                        # Definición de rutas
+└── web.php                          # Definición de rutas
 ```
 
 ## 📊 Esquema de Base de Datos
-
+### Tabla users (generada por Laravel Breeze)
+```sql
+CREATE TABLE users (
+    id BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    name VARCHAR(255) NOT NULL,
+    email VARCHAR(255) NOT NULL UNIQUE,
+    password VARCHAR(255) NOT NULL,
+    remember_token VARCHAR(100) NULL,
+    created_at TIMESTAMP NULL,
+    updated_at TIMESTAMP NULL
+);
+```
+### Tabla sessions (para SESSION_DRIVER=database)
+```sql
+CREATE TABLE sessions (
+    id VARCHAR(255) NOT NULL PRIMARY KEY,
+    user_id BIGINT UNSIGNED NULL,
+    ip_address VARCHAR(45) NULL,
+    user_agent TEXT NULL,
+    payload TEXT NOT NULL,
+    last_activity INT NOT NULL,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+```
 ### Tabla `google_tokens`
 ```sql
 CREATE TABLE google_tokens (
@@ -192,6 +249,20 @@ php artisan migrate
 - Asegúrate de que `GOOGLE_REDIRECT_URI` coincida exactamente con Google Console
 - Incluye el protocolo (`http://` o `https://`)
 
+### Error: "SMTP Error: Could not authenticate"
+- Causa: Tokens inválidos o configuración incorrecta de OAuth2.
+- Solución:
+    - Elimina los tokens existentes:
+        ```sql
+        DELETE FROM google_tokens WHERE user_id = (SELECT id FROM users WHERE email = 'tu-email@gmail.com');
+        ```
+    - Reautentica en `/auth/google`.
+    - Habilita depuración SMTP en `GoogleAuthController`:
+        ```php
+        $email->SMTPDebug = SMTP::DEBUG_SERVER;
+        ``` 
+    - Revisa los logs en `storage/logs/laravel.log`.
+
 ### Debug de SMTP
 ```env
 # Habilitar debug en .env
@@ -200,12 +271,13 @@ LOG_LEVEL=debug
 ```
 
 ## 🔒 Consideraciones de Seguridad
+- ✅ Usa **HTTPS** en producción para proteger los tokens OAuth2.
+- ✅ Almacena tokens en la base de datos con cifrado (`access_token` y `refresh_token`).
+- ✅ Valida el estado CSRF en el callback de Google OAuth2.
+- ✅ Aplica sanitización de inputs en formularios.
+- ✅ Configura rate limiting para rutas sensibles (`login`, `register`, `auth/google`).
 
-- ✅ Usa **HTTPS** en producción
-- ✅ Tokens almacenados de forma segura en BD
-- ✅ Validación de estado CSRF
-- ✅ Sanitización de inputs
-- ✅ Rate limiting en rutas sensibles
+
 
 ### Variables de Entorno para Producción
 ```env
@@ -218,9 +290,10 @@ GOOGLE_REDIRECT_URI=https://tudominio.com/google/callback
 
 ```json
 {
+    "laravel/framework": "^10.0",
+    "laravel/breeze": "^1.29",
     "league/oauth2-client": "^2.7",
-    "phpmailer/phpmailer": "^6.8",
-    "laravel/framework": "^10.0"
+    "phpmailer/phpmailer": "^6.8"
 }
 ```
 

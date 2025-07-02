@@ -281,7 +281,7 @@ Este proyecto está licenciado bajo la **Licencia MIT**. Ver el archivo [LICENSE
 
 ¿Necesitas ayuda? 
 
-- 📧 Email: tu-email@example.com
+- 📧 Email: jvaronbueno@gmial.com
 - 🐛 Issues: [GitHub Issues](https://github.com/JavierVaronBueno/web-google-oauth/issues)
 - 💬 Discusiones: [GitHub Discussions](https://github.com/JavierVaronBueno/web-google-oauth/discussions)
 
@@ -291,6 +291,6 @@ Este proyecto está licenciado bajo la **Licencia MIT**. Ver el archivo [LICENSE
 
 **⭐ Si este proyecto te fue útil, no olvides darle una estrella en GitHub ⭐**
 
-Made with ❤️ by [Tu Nombre](https://github.com/JavierVaronBueno)
+Made with ❤️ by [Javier Varon](https://github.com/JavierVaronBueno)
 
 </div>

@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Controllers\AuthController;
 use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\GoogleAuthController;
 
@@ -16,13 +17,17 @@ use App\Http\Controllers\GoogleAuthController;
 
 Route::get('/', function () {
     return view('welcome');
+})->name('home');
+
+// Rutas de autenticación
+Route::get('login', [AuthController::class, 'showLoginForm'])->name('login');
+Route::post('login', [AuthController::class, 'login'])->name('login.post');
+Route::get('register', [AuthController::class, 'showRegistrationForm'])->name('register');
+Route::post('register', [AuthController::class, 'register'])->name('register.post');
+Route::post('logout', [AuthController::class, 'logout'])->name('logout');
+
+Route::middleware('auth')->group(function () {
+    Route::get('auth/google', [GoogleAuthController::class, 'redirectToGoogle'])->name('auth.google');
+    Route::get('google/callback', [GoogleAuthController::class, 'handleGoogleCallback'])->name('google.callback');
+    Route::post('send-email', [GoogleAuthController::class, 'sendEmailWithPHPMailer'])->name('send.email');
 });
-
-// Ruta para iniciar el proceso de autenticación de Google
-Route::get('auth/google', [GoogleAuthController::class, 'redirectToGoogle'])->name('auth.google');
-
-// Ruta de callback a la que Google redirigirá después de la autenticación
-Route::get('google/callback', [GoogleAuthController::class, 'handleGoogleCallback']);
-
-// Opcional: Una ruta para probar el envío de correo si ya tienes el token de acceso guardado
-Route::get('send-email', [GoogleAuthController::class, 'sendEmailWithPHPMailer']);

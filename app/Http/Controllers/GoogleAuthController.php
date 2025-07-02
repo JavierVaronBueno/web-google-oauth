@@ -2,9 +2,12 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\GoogleToken;
+use App\Services\GoogleAuthService;
+use App\Models\User;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Log;
-use League\OAuth2\Client\Provider\Google;
 use PHPMailer\PHPMailer\PHPMailer;
 use PHPMailer\PHPMailer\Exception;
 use PHPMailer\PHPMailer\OAuth;
@@ -12,115 +15,90 @@ use PHPMailer\PHPMailer\SMTP;
 
 class GoogleAuthController extends Controller
 {
-    protected $provider;
+    /**
+     * The Google authentication service.
+     *
+     * @var GoogleAuthService
+     */
+    protected $googleAuthService;
 
-    public function __construct()
+    /**
+     * Create a new controller instance.
+     *
+     * @param GoogleAuthService $googleAuthService
+     */
+    public function __construct(GoogleAuthService $googleAuthService)
     {
-        // Inicializa el proveedor de Google OAuth2
-        $this->provider = new Google([
-            'clientId'     => env('GOOGLE_CLIENT_ID'),
-            'clientSecret' => env('GOOGLE_CLIENT_SECRET'),
-            'redirectUri'  => env('GOOGLE_REDIRECT_URI'),
-        ]);
+        $this->googleAuthService = $googleAuthService;
     }
 
     /**
-     * Redirige al usuario a la página de autenticación de Google.
+     * Redirect the user to the Google authentication page.
      *
-     * @return \Illuminate\Http\Response
+     * @return \Illuminate\Http\RedirectResponse
      */
     public function redirectToGoogle()
     {
-        // Define los alcances (scopes) necesarios. 'email' y 'profile' para datos básicos.
-        // 'https://mail.google.com/' es crucial para enviar correos.
-        $options = [
-            'scope' => [
-                'email',
-                'profile',
-                'https://mail.google.com/' // Permiso para enviar correos
-            ],
-            'access_type' => 'offline', // Solicita un refresh token
-            'prompt' => 'consent'
-        ];
-
-        $authUrl = $this->provider->getAuthorizationUrl($options);
-
-        // Guarda el 'state' para verificar la respuesta de Google
-        session(['oauth2state' => $this->provider->getState()]);
-
-        return redirect($authUrl);
+        try {
+            return redirect($this->googleAuthService->getAuthorizationUrl());
+        } catch (\Exception $e) {
+            Log::error('Failed to generate Google authorization URL: ' . $e->getMessage());
+            return redirect('/')->with('error', 'Error al iniciar la autenticación con Google.');
+        }
     }
 
     /**
-     * Maneja la respuesta de la autenticación de Google.
+     * Handle the Google OAuth2 callback.
      *
-     * @param  \Illuminate\Http\Request  $request
-     * @return \Illuminate\Http\Response
+     * @param Request $request
+     * @return \Illuminate\Http\RedirectResponse
      */
     public function handleGoogleCallback(Request $request)
     {
-        // Verifica si hay un error en la respuesta de Google
-        if ($request->has('error')) {
-            return redirect('/')->with('error', 'Error en la autenticación: ' . $request->input('error'));
-        }
-
-        // Verifica el 'state' para prevenir ataques CSRF
-        if (empty($request->input('state')) || ($request->input('state') !== session('oauth2state'))) {
-            session()->forget('oauth2state');
-            exit('Invalid state');
-        }
-
         try {
-            // Intenta obtener el token de acceso usando el código de autorización
-            $accessToken = $this->provider->getAccessToken('authorization_code', [
-                'code' => $request->input('code')
-            ]);
+            $user = Auth::user();
+            if (!$user) {
+                throw new \Exception('User not authenticated');
+            }
 
-            // En este punto, $accessToken contiene:
-            // - Access Token (para acceder a los recursos del usuario)
-            // - Refresh Token (para obtener un nuevo Access Token cuando expire el actual)
-            // - Expires In (cuánto tiempo es válido el Access Token)
-            // - User ID (ID del usuario)
+            $token = $this->googleAuthService->handleCallback(
+                $request->input('code'),
+                $request->input('state'),
+                $user
+            );
 
-            // Generalmente, querrás guardar el Refresh Token de forma segura en tu base de datos
-            // asociado al usuario para poder enviar correos en el futuro sin que el usuario
-            // tenga que re-autenticarse constantemente.
-
-            // Para este ejemplo, almacenaremos el access token y refresh token en la sesión.
-            // En un entorno real, ¡nunca los guardes en sesión para producción!
-            // Usa una base de datos o un sistema de almacenamiento seguro.
-            session([
-                'google_access_token'  => $accessToken->getToken(),
-                'google_refresh_token' => $accessToken->getRefreshToken(),
-                'google_token_expires' => $accessToken->getExpires(),
-            ]);
-
-            // Ahora podemos usar PHPMailer para enviar un correo
-            return $this->sendEmailWithPHPMailer();
-
-        } catch (\League\OAuth2\Client\Provider\Exception\IdentityProviderException $e) {
-            // Falló al obtener el token de acceso
-            return redirect('/')->with('error', 'Error al obtener el token de acceso: ' . $e->getMessage());
+            return $this->sendEmailWithPHPMailer($user, $token);
+        } catch (\Exception $e) {
+            Log::error('Google callback error: ' . $e->getMessage());
+            return redirect('/')->with('error', $e->getMessage());
         }
     }
 
     /**
-     * Envía un correo electrónico usando PHPMailer con las credenciales de OAuth2.
+     * Send an email using PHPMailer with Google OAuth2 credentials.
      *
-     * @return \Illuminate\Http\Response
+     * @return \Illuminate\Http\RedirectResponse
      */
     public function sendEmailWithPHPMailer()
     {
-        $accessToken = session('google_access_token');
-        $refreshToken = session('google_refresh_token');
-        Log::info("Entre al envio de correo");
-        if (!$accessToken) {
-            return redirect('/')->with('error', 'No se encontró el token de acceso. Por favor, autentique con Google primero.');
-        }
-
-        $email = new PHPMailer(true);
-
         try {
+            $user = Auth::user();
+            if (!$user) {
+                throw new \Exception('User not authenticated');
+            }
+
+            $token = $user->googleToken;
+            if (!$token) {
+                throw new \Exception('No Google token found for the user');
+            }
+
+            if ($token->expires_at->isPast() && $token->refresh_token) {
+                Log::info('Access token expired, attempting to refresh for user: ' . $user->email);
+                $token = $this->googleAuthService->refreshAccessToken($token);
+            }
+
+            $email = new PHPMailer(true);
+
             // Configuración del servidor SMTP para Gmail
             $email->isSMTP();
             $email->Host       = env('MAIL_HOST');
@@ -135,13 +113,16 @@ class GoogleAuthController extends Controller
             $email->AuthType = 'XOAUTH2';
 
             // Configurar el cliente OAuth2 para PHPMailer
+            if (!$this->googleAuthService->getProvider()) {
+                throw new \Exception('OAuth provider not configured');
+            }
             $email->setOAuth(
                 new OAuth([
-                    'provider'         => $this->provider,
+                    'provider'         => $this->googleAuthService->getProvider(),
                     'clientId'         => env('GOOGLE_CLIENT_ID'),
                     'clientSecret'     => env('GOOGLE_CLIENT_SECRET'),
-                    'refreshToken'     => $refreshToken,
-                    'accessToken'      => $accessToken,
+                    'refreshToken'     => $token->refresh_token,
+                    'accessToken'      => $token->access_token,
                     'tokenExpires'     => session('google_token_expires'),
                     'userName'         => env('MAIL_FROM_ADDRESS'), // Correo del remitente de tu cuenta de Google
                 ])
@@ -149,21 +130,23 @@ class GoogleAuthController extends Controller
 
             // Remitente y Destinatario
             $email->setFrom(env('MAIL_FROM_ADDRESS'), env('MAIL_FROM_NAME'));
-            $email->addAddress('jvaronbueno@gmail.com', 'Javox Malkavian');
+            $email->addAddress($user->email, $user->name);
             $email->addReplyTo(env('MAIL_FROM_ADDRESS'), env('MAIL_FROM_NAME'));
 
             // Contenido del correo
             $email->isHTML(true);
-            $email->Subject = 'Asunto de prueba desde Laravel con OAuth2';
-            $email->Body    = 'Hola, este es un <b>correo de prueba</b> enviado desde Laravel 10 usando PHPMailer y Google OAuth2.';
-            $email->AltBody = 'Hola, este es un correo de prueba enviado desde Laravel 10 usando PHPMailer y Google OAuth2.';
+            $email->Subject = 'Prueba de correo desde Laravel con OAuth2';
+            $email->Body = 'Hola, este es un <b>correo de prueba</b> enviado desde Laravel usando PHPMailer y Google OAuth2.';
+            $email->AltBody = 'Hola, este es un correo de prueba enviado desde Laravel usando PHPMailer y Google OAuth2.';
 
+            Log::info('Attempting to send email for user: ' . $user->email);
             $email->send();
-            return redirect('/')->with('success', 'Correo enviado exitosamente con PHPMailer y OAuth2!');
+            Log::info('Email sent successfully for user: ' . $user->email);
 
+            return redirect()->route('home')->with('success', 'Correo enviado exitosamente con PHPMailer y OAuth2!');
         } catch (Exception $e) {
-            // Captura errores de PHPMailer
-            return redirect('/')->with('error', 'Error al enviar el correo: ' . $email->ErrorInfo . ' | PHPMailer Exception: ' . $e->getMessage());
+            Log::error('Failed to send email: ' . $e->getMessage() . ' | PHPMailer ErrorInfo: ' . $email->ErrorInfo);
+            return redirect()->route('home')->with('error', 'Error al enviar el correo: ' . $e->getMessage() . ' | PHPMailer ErrorInfo: ' . $email->ErrorInfo);
         }
     }
 }

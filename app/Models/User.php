@@ -42,4 +42,12 @@ class User extends Authenticatable
         'email_verified_at' => 'datetime',
         'password' => 'hashed',
     ];
+
+    /**
+     * Get the Google token associated with the user.
+     */
+    public function googleToken()
+    {
+        return $this->hasOne(GoogleToken::class);
+    }
 }
